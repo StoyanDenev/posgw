@@ -97,7 +97,7 @@ public:
         m_message.clear();
 
         while(true) {
-            int result = poll(&fd, 1, 20000); // 3 seconds timeout
+            int result = poll(&fd, 1, 3000); // 3 seconds timeout
             switch(result) {
                 case -1:
                     cerr << "Error: recv error" << endl;
