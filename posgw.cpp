@@ -170,7 +170,7 @@ public:
         sqlite3_stmt *stmt;
         sqlite3_prepare_v2(m_pSqlite, sql, -1, &stmt, NULL);
 
-        while (sqlite3_step(stmt) != SQLITE_DONE) {
+        while(sqlite3_step(stmt) != SQLITE_DONE) {
             int i;
             int num_cols = sqlite3_column_count(stmt);
             
@@ -178,19 +178,36 @@ public:
                 switch (sqlite3_column_type(stmt, i))
                 {
                     case (SQLITE3_TEXT):
-                        printf("%s, ", sqlite3_column_text(stmt, i));
+                        cout << sqlite3_column_text(stmt, i) << ", ";
                         break;
                     case (SQLITE_FLOAT):
-                        printf("%g, ", sqlite3_column_double(stmt, i));
+                        cout << sqlite3_column_double(stmt, i) << ", ";
                         break;
                     default:
                         break;
                 }
             }
-            printf("\n");
+            cout << endl;
         }
 
         sqlite3_finalize(stmt);
+    }
+
+    double fetch(const char* sql)
+    {
+        double result = 0;
+        sqlite3_stmt *stmt;
+        sqlite3_prepare_v2(m_pSqlite, sql, -1, &stmt, NULL);
+
+        if(sqlite3_step(stmt) != SQLITE_DONE) {
+            if(SQLITE_FLOAT == sqlite3_column_type(stmt, 0)){
+                result = sqlite3_column_double(stmt, 0);
+            }
+        }
+
+        sqlite3_finalize(stmt);
+
+        return result;
     }
 
     ~SqliteStore()
@@ -288,7 +305,11 @@ public:
 
     void Recon()
     {
+        double approvedSum = m_pDB->fetch("select sum(amount) from transactions where status = 'APPROVED'");
+        double declinedSum = m_pDB->fetch("select sum(amount) from transactions where status = 'DECLINED'");
 
+        cout << "Approved Sum: " << approvedSum << endl;
+        cout << "Declined Sum: " << declinedSum << endl;
     }
 };
 
@@ -354,7 +375,7 @@ int main(int argc, char * argv[])
             pSession->Last(count);
         }
     } else if(command == "recon") {
-        cout << "recon\n";
+        pSession->Recon();
     }
 
     delete pSession;
