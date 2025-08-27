@@ -86,9 +86,6 @@ public:
         tv.tv_sec = 2;
         tv.tv_usec = 0;
         setsockopt(m_socket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-
-        cout << "Send: " << message << endl;
-
         send(m_socket, message, strlen(message), 0);
     }
 
@@ -97,6 +94,7 @@ public:
         struct pollfd fd;
         fd.fd = m_socket;
         fd.events = POLLIN;
+        m_message.clear();
 
         while(true) {
             int result = poll(&fd, 1, 20000); // 3 seconds timeout
@@ -111,7 +109,6 @@ public:
                     if (fd.revents & POLLIN) {
                         int ret = recv(m_socket,m_buffer,sizeof(m_buffer), 0);
                         m_buffer[ret] = 0;
-                        cout << "Receive: " << m_buffer << endl;
                         stringstream ss(m_buffer);
                         string message_part;
 
@@ -130,26 +127,70 @@ public:
 
 class SqliteStore
 {
+    int         m_rc;
     sqlite3*    m_pSqlite;
+    char*       m_errMsg;
+    bool        m_connected;
 public:
     SqliteStore()
     {
-        char *errMsg = 0;
-        int rc = sqlite3_open("transactions.db", &m_pSqlite);
+        m_errMsg = 0;
+        m_connected = false;
+        m_rc = sqlite3_open("transactions.db", &m_pSqlite);
 
-        if(rc) {
+        if(m_rc) {
             cerr << "Error: Can't open database: " << sqlite3_errmsg(m_pSqlite) << endl;
+            return;
         } else {
-            cout << "Database opened" << endl;
+            m_connected = true;
         }
 
-        rc = sqlite3_exec(m_pSqlite, "create table if not exists transactions (amount REAL, status CHAR(16), reason CHAR(64));", 0, 0, &errMsg);
-        if( rc != SQLITE_OK ){
-            cerr << "SQL error: " << errMsg << endl;
-            sqlite3_free(errMsg);
-        } else {
-            cout << "Table transactions created successfully" << endl;
+        m_rc = sqlite3_exec(m_pSqlite, "create table if not exists transactions (amount REAL, status CHAR(16), reason CHAR(64));", 0, 0, &m_errMsg);
+        if( m_rc != SQLITE_OK ){
+            cerr << "SQL error: " << m_errMsg << endl;
+            sqlite3_free(m_errMsg);
         }
+    }
+
+    bool executeSQL(const char* sql)
+    {
+        m_rc = sqlite3_exec(m_pSqlite, sql, 0, 0, &m_errMsg);
+        if( m_rc != SQLITE_OK ){
+            cerr << "SQL error: " << m_errMsg << endl;
+            sqlite3_free(m_errMsg);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    void printResults(const char* sql)
+    {
+        sqlite3_stmt *stmt;
+        sqlite3_prepare_v2(m_pSqlite, sql, -1, &stmt, NULL);
+
+        while (sqlite3_step(stmt) != SQLITE_DONE) {
+            int i;
+            int num_cols = sqlite3_column_count(stmt);
+            
+            for (i = 0; i < num_cols; i++) {
+                switch (sqlite3_column_type(stmt, i))
+                {
+                    case (SQLITE3_TEXT):
+                        printf("%s, ", sqlite3_column_text(stmt, i));
+                        break;
+                    case (SQLITE_FLOAT):
+                        printf("%g, ", sqlite3_column_double(stmt, i));
+                        break;
+                    default:
+                        break;
+                }
+            }
+            printf("\n");
+        }
+
+        sqlite3_finalize(stmt);
     }
 
     ~SqliteStore()
@@ -225,14 +266,24 @@ public:
         return false;
     }
 
-    void Store(const char* amount, const char* status, const char* reason)
+    void Store(const char* amount)
     {
+        stringstream ss;
+        ss << "insert into transactions values (";
+        ss << amount << ",";
+        ss << "'" << m_status << "',";
+        ss << "'" << m_reason << "'";
+        ss << ");";
 
+        m_pDB->executeSQL(ss.str().c_str());
     }
 
-    void Last()
+    void Last(unsigned int count)
     {
+        stringstream ss;
+        ss << "select * from transactions order by rowid desc limit " << count;
 
+        m_pDB->printResults(ss.str().c_str());
     }
 
     void Recon()
@@ -252,10 +303,9 @@ int main(int argc, char * argv[])
     string command(argv[1]);
 
     if(command == "sale") {
-        cout << "sale\n";
-
         if(argc < 8) {
             cout << "Error: Missing arguments" << endl;
+            delete pSession;
             return 1;
         }
 
@@ -276,8 +326,14 @@ int main(int argc, char * argv[])
             }
         }
 
+        if(0 == port || 0 == host.length() || 0 == amount.length()) {
+            cerr << "Error: Missing parameters" << endl;
+            delete pSession;
+            return 1;
+        }
+
         bool success = pSession->Send(amount.c_str(), host.c_str(), port);
-        pSession->Store(amount.c_str(), pSession->m_status.c_str(), pSession->m_reason.c_str());
+        pSession->Store(amount.c_str());
 
         if(!success) {
             cerr << "Error: Auth declined" << endl;
@@ -285,7 +341,18 @@ int main(int argc, char * argv[])
             return 1;
         }
     } else if(command == "last") {
-        cout << "last\n";
+        string param(argv[2]);
+        string value(argv[3]);
+        int count = 0;
+        count = stoi(value);
+
+        if(param != "--n" || count < 1) {
+            cerr << "Error: Missing parameters" << endl;
+            delete pSession;
+            return 1;
+        } else {
+            pSession->Last(count);
+        }
     } else if(command == "recon") {
         cout << "recon\n";
     }
